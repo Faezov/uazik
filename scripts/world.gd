@@ -14,6 +14,8 @@ var inside := false
 var arrived := false
 var label: Label
 var debug_label: Label
+var instructions: Label
+var help_tween: Tween
 var mode_notice := 0.0
 var audio_settings: PanelContainer
 
@@ -80,11 +82,24 @@ func _ready() -> void:
 	ui.add_child(debug_label)
 	debug_label.position = Vector2(30,245)
 	debug_label.add_theme_font_size_override("font_size",16)
-	var instructions := Label.new()
+	debug_label.hide()
+	instructions = Label.new()
 	ui.add_child(instructions)
-	instructions.position = Vector2(30,655)
+	instructions.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	instructions.anchor_left = 0.025
+	instructions.anchor_right = 0.975
+	instructions.anchor_top = 0.96
+	instructions.anchor_bottom = 0.96
+	instructions.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	instructions.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	instructions.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	instructions.text = "WASD / Arrows: drive     Space: brake     C: camera     V: inspect     R: return to road     F3: telemetry     Esc: pause"
-	instructions.text += "\nM: radio on/off   N: next track"
+	instructions.text += "\nM: radio on/off   N: next track     F1: controls on/off"
+	help_tween = create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	help_tween.tween_interval(5.0)
+	help_tween.tween_property(instructions,"modulate:a",0.0,0.6).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	help_tween.tween_callback(instructions.hide)
 	inspection = preload("res://scripts/inspection_camera.gd").new()
 	inspection.name = "InspectionCamera"
 	inspection.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
@@ -95,6 +110,12 @@ func _ready() -> void:
 	add_child(radio)
 	move_child(ui,get_child_count()-1)
 	ui.move_child(audio_settings,ui.get_child_count()-1)
+
+func toggle_controls() -> void:
+	# Manual help stays visible until F1 is pressed again, including in inspection.
+	if help_tween: help_tween.kill()
+	instructions.visible = not instructions.visible
+	instructions.modulate.a = 1.0
 
 func make_car() -> void:
 	car = VehicleBody3D.new()
@@ -179,13 +200,16 @@ func _physics_process(delta: float) -> void:
 	if car.position.y<surface_height(car.position.x,car.position.z)-12:
 		recover_car(car.position.z)
 	if car.position.z < -485 and absf(car.position.x-route(car.position.z))<22: arrived = true
-	label.text = "ДО ДОМА\n" + ("Вы дома. Вас ждали.\nYou’re home. Take a moment." if arrived else "Drive home · Деревня Сосновка\n%d m remaining" % maxi(0,int(490+car.position.z)))
+	label.text = ("You’re home. Take a moment." if arrived else "Drive home ·\n%d m remaining" % maxi(0,int(490+car.position.z)))
 	label.text += "\n%02d km/h  ·  %s\n1: 2H   2: 4H   3: 4L (stop)" % [int(car.linear_velocity.length()*3.6),car.drive_mode]
 	if mode_notice>0: label.text += "\nStop before changing low range"
 	if debug_label.visible:
+		var slip := PackedStringArray()
+		for value in car.wheel_slip: slip.append("%+.1f" % value)
 		var contact := PackedStringArray()
 		for wheel in car.wheels: contact.append("ON" if wheel.is_in_contact() else "--")
 		debug_label.text = "TELEMETRY · F3 to hide\nSpeed %.1f km/h   Gear %s   RPM %.0f\nTire force %+.0f N (total)\nContact FL / FR / RL / RR: %s" % [car.linear_velocity.length()*3.6,"R" if car.gear<0 else str(car.gear),car.engine_rpm,car.drive_force," / ".join(contact)]
+		debug_label.text += "\nSteer %+.1f°   Lateral %+.2f m/s\nWheel slip FL / FR / RL / RR (m/s): %s" % [rad_to_deg(car.steering),car.linear_velocity.dot(car.global_basis.x)," / ".join(slip)]
 		var surfaces := PackedStringArray()
 		for cover: Vector2 in car.wheel_surfaces: surfaces.append("ICE" if cover.x>0.5 else ("DEEP" if cover.y>0.5 else "SNOW"))
 		debug_label.text += "\nTires FL / FR / RL / RR: %s" % " / ".join(surfaces)

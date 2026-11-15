@@ -27,6 +27,7 @@ const DRAG_AREA = 2.2
 var wheels: Array[VehicleWheel3D] = []
 var drive_mode := "2H"
 var wheel_visuals: Array[Node3D] = []
+var wheel_slip := PackedFloat32Array([0,0,0,0]) # Contact slip speed, m/s; F3 telemetry.
 var wheel_omega := PackedFloat64Array([0,0,0,0])
 var spin_angle := PackedFloat64Array([0,0,0,0])
 var previous_spin := PackedFloat64Array([0,0,0,0])
@@ -100,7 +101,8 @@ func _ready() -> void:
 	center_of_mass = Vector3(0,0.12,-0.22)
 	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	linear_damp = 0.0 # Explicit tire and aerodynamic forces below; no hidden default damping.
-	angular_damp = 0.65
+	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+	angular_damp = 0.25 # Springs/dampers, rather than global drag, settle the body.
 	continuous_cd = true
 	can_sleep = false
 	rng.seed = 452
@@ -269,13 +271,12 @@ func build_wheel(side: int, axle: float) -> void:
 	wheel.position = Vector3(side*0.7275,-0.22,axle)
 	wheel.wheel_radius = 0.375
 	wheel.wheel_rest_length = 0.24
-	wheel.suspension_travel = 0.18
-	wheel.suspension_stiffness = 26 # Approx. 1.6 Hz body bounce, leaf-spring tuning.
+	wheel.suspension_travel = 0.22
+	wheel.suspension_stiffness = 24 if axle<0 else 22 # Front carries more of the empty van.
 	wheel.suspension_max_force = 14000
-	wheel.damping_compression = 2.2
-	wheel.damping_relaxation = 3.0
-	wheel.wheel_roll_influence = 0.25
-	wheel.wheel_friction_slip = 0.42
+	wheel.damping_compression = 1.8
+	wheel.damping_relaxation = 2.8
+	wheel.wheel_friction_slip = 0.0 # Tire forces below; keep native suspension only.
 	wheel.use_as_traction = axle>0
 	wheel.use_as_steering = axle<0
 	add_child(wheel)
@@ -315,6 +316,7 @@ func select_drive_mode(mode: String) -> bool:
 
 func reset_wheel_motion() -> void:
 	for i in range(wheels.size()):
+		wheel_slip[i] = 0
 		wheel_omega[i] = 0
 		spin_angle[i] = 0
 		previous_spin[i] = 0
@@ -343,10 +345,12 @@ func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> v
 	if change_direction and not braking:
 		gear = -1 if accelerator<0 else 1
 		shift_time = 0.3
-	throttle = move_toward(throttle,absf(accelerator) if not braking else 0.0,delta*0.85)
-	# Keep steering available when the surface cannot supply the requested cornering force.
-	var limit := minf(0.50,atan(2.3*5.0/maxf(speed*speed,1)))
-	steering = lerpf(steering,turn*limit,1-exp(-delta/(0.22+absf(speed)*0.006)))
+	var pedal := absf(accelerator) if not braking else 0.0
+	throttle = move_toward(throttle,pedal,delta*(2.5 if pedal>throttle else 5.0))
+	# Prompt pedal/rack response; mass and contact forces provide the heaviness.
+	# Leave enough steering authority to exceed grip and countersteer on snow.
+	var limit := minf(0.50,maxf(0.10,atan(2.3*8.0/maxf(speed*speed,1))))
+	steering = lerpf(steering,turn*limit,1-exp(-delta/(0.12+absf(speed)*0.003)))
 	var driven_count := 2 if drive_mode=="2H" else 4
 	var wheel_rotation := 0.0
 	var contacts := 0
@@ -391,7 +395,7 @@ func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> v
 		shaft_torque -= signf(wheel_rotation)*overrun*closed_throttle*smoothstep(760,1200,coupled_rpm)*ratio*FINAL_DRIVE
 	if braking or brake_pressure>0: shaft_torque = 0
 	brake_pressure = move_toward(brake_pressure,1.0 if braking else 0.0,delta*6)
-	engine_force = -shaft_torque/(0.375*driven_count)
+	engine_force = 0
 	# Longitudinal braking is included in tire torque; native brake would apply it twice.
 	brake = 0
 	apply_central_force(-linear_velocity*linear_velocity.length()*0.5*1.225*DRAG_AREA)
@@ -402,13 +406,17 @@ func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> v
 		var radius := wheel.wheel_radius
 		var normal := wheel.get_contact_normal() if wheel.is_in_contact() else global_basis.y
 		var point := wheel.get_contact_point() if wheel.is_in_contact() else wheel.global_position
-		var velocity := linear_velocity+angular_velocity.cross(point-global_position)
+		var velocity := linear_velocity+angular_velocity.cross(point-to_global(center_of_mass))
 		var forward := (-global_basis.z).rotated(global_basis.y,wheel.steering).slide(normal).normalized()
 		var rolling_speed := velocity.dot(forward)
 		var slip_speed := wheel_omega[i]*radius-rolling_speed
+		var side := forward.cross(normal)
+		var lateral_speed := velocity.dot(side)
+		wheel_slip[i] = slip_speed if wheel.is_in_contact() else 0.0
 		var cover := wheel_surfaces[i]
 		var grip := lerpf(lerpf(0.42,0.36,cover.y),0.045,cover.x)
-		grip *= lerpf(1.0,0.78,smoothstep(0.15,1.5,absf(slip_speed)))
+		var slip := Vector2(slip_speed,lateral_speed).length()/maxf(absf(rolling_speed),2.0)
+		grip *= lerpf(1.0,0.78,smoothstep(0.12,0.8,slip))
 		var load := contact_load(i)
 		var inertia := WHEEL_INERTIA
 		var torque := 0.0
@@ -418,23 +426,30 @@ func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> v
 		var brake_torque := brake_pressure*mass*5.0*radius/wheels.size()
 		var brake_reaction := clampf(wheel_omega[i]*inertia/delta+torque,-brake_torque,brake_torque)
 		# Implicit rolling constraint; excess torque accelerates the tire, not the van.
-		var force := (torque-brake_reaction+(wheel_omega[i]-rolling_speed/radius)*inertia/delta)/radius
+		var share := mass*(0.275 if wheel.use_as_steering else 0.225)
+		# Include chassis acceleration in the rolling constraint, not just wheel inertia.
+		var force := (torque-brake_reaction+slip_speed*inertia/(radius*delta))/radius
+		force /= 1.0+inertia/(share*radius*radius)
 		force = clampf(force,-grip*load,grip*load)
 		wheel_omega[i] += (torque-force*radius)*delta/inertia
 		wheel_omega[i] = move_toward(wheel_omega[i],0,brake_torque*delta/inertia)
-		# Native friction weights forward impulse by 0.5. Correct its ellipse so
-		# accelerating/braking tires consume the same grip needed for cornering.
-		var utilization := absf(force)/maxf(grip*load,1.0)
-		wheel.wheel_friction_slip = grip*sqrt(1-0.75*utilization*utilization)
-		wheel.engine_force = -force
+		# Native friction can rescale drive force without updating our wheel spin.
+		# Apply both tire forces here, at the full contact lever arm for roll/pitch.
+		# A shared friction circle: drive/brake force leaves less cornering grip.
+		# Finite cornering stiffness builds slip before saturation; rear is slightly firmer.
+		var remaining := sqrt(maxf(pow(grip*load,2)-force*force,0.0))
+		var lateral := -lateral_speed*load*(5.0 if wheel.use_as_steering else 5.5)/maxf(absf(rolling_speed),2.0)
+		lateral /= sqrt(1.0+pow(lateral/maxf(remaining,1.0),2))
+		wheel.engine_force = 0
 		wheel.brake = 0
+		if wheel.is_in_contact():
+			apply_force(forward*force+side*lateral,point-global_position)
 		previous_spin[i] = spin_angle[i]
 		# Native wheel basis is mirrored; account for its handedness when adding roll.
 		spin_angle[i] -= signf(wheel.basis.determinant())*(wheel_omega[i]+wheel.get_rpm()*TAU/60)*delta
 		drive_force += force
 		if wheel.is_in_contact():
 			var resistance := lerpf(lerpf(0.035,0.30,cover.y),0.008,cover.x)*load
-			var share := mass*(0.275 if wheel.use_as_steering else 0.225)
 			# Soil compaction opposes impending motion, up to the available snow resistance.
 			var demand := velocity.slide(normal)*share/delta+forward*force+Vector3.DOWN*9.81*share
 			apply_force(-demand.slide(normal).limit_length(resistance),point-global_position)

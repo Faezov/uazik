@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="До дома — The Road Home"
+config/name="The Road Home"
 run/main_scene="res://scenes/main.tscn"
 config/icon="res://icon.svg"
 config/features=PackedStringArray("4.5")

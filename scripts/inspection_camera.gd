@@ -35,7 +35,7 @@ func toggle() -> void:
 		safe_distance = bounds.size.length() * 0.5 + 0.25
 		reset_view()
 		make_current()
-		instructions.text = "INSPECTION · Driving paused\nLeft drag: orbit   Wheel: zoom   Middle drag: pan   R: reset   V: drive · Esc: pause"
+		instructions.text = "INSPECTION · Driving paused\nLeft drag: orbit   Wheel: zoom   Middle drag: pan   R: reset   V: drive · Esc: pause · F1: controls on/off"
 	else:
 		driving_camera.make_current()
 		instructions.text = driving_hint
@@ -52,6 +52,8 @@ func _input(event: InputEvent) -> void:
 		var key: int = event.physical_keycode if event.physical_keycode else event.keycode
 		if key == KEY_V:
 			toggle()
+		elif key == KEY_F1:
+			get_parent().toggle_controls()
 		elif active:
 			if key == KEY_ESCAPE: return
 			elif key == KEY_R: reset_view()
