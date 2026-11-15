@@ -1,0 +1,13 @@
+Engine recording: "The Soviet UAZ Bukhanka" by spinopel.
+https://pixabay.com/sound-effects/film-special-effects-the-soviet-uaz-bukhanka-559429/
+Pixabay Content License: https://pixabay.com/service/license-summary/
+Licence verified 2026-11-15. Use these sounds within the game; do not redistribute
+the source recording as a standalone sound library.
+
+The supplied spinopel-the-soviet-uaz-bukhanka-559429.mp3 is preserved unchanged.
+uaz_idle.wav, uaz_medium.wav and uaz_high.wav are edited excerpts: mono PCM,
+27 Hz high-pass / 6.5 kHz low-pass, pulse-rate adjustment, circular crossfades
+and level matching. Source excerpts: 0.35–2.75 s, 2.9–4.7 s, 5.45–6.65 s.
+900 / 1800 / 3600 RPM anchors are playback tuning estimates. These are three
+prepared textures from one short recording, not independently recorded or
+tachometer-calibrated idle / medium / high RPM takes. No startup/shutdown takes.
