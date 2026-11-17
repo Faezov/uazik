@@ -4,26 +4,28 @@ extends VehicleBody3D
 # Photo reference: https://all-auto.org/287-uaz-unikalnye-vnedorozhniki-s-legendarnoy-istoriey.html
 # Dimensions: https://www.uaz.ru/data/uaz/assets/uaz-sgr-catalog.pdf
 # Model faces -Z; Godot's positive engine force faces +Z.
-const AXLES = [-1.26, 1.04]
-const MODEL_OFFSET = Vector3(0, -0.72, 0)
+var axle_positions := [-1.26, 1.04]
+var model_offset := Vector3(0, -0.72, 0)
 # Period UAZ gearbox, high transfer range (1:1), final drive.
 # https://www.zr.ru/archive/zr/1965/09/novosti-sovietskoi-tiekhniki
-const GEARS = [4.124, 2.641, 1.58, 1.0]
-const REVERSE_RATIO = 5.224
-const FINAL_DRIVE = 5.125
+var gear_ratios := [4.124, 2.641, 1.58, 1.0]
+var reverse_ratio := 5.224
+var final_drive := 5.125
 # UAZ transfer case: https://www.uaz.ru/data/uploads/uaz/originals/manual-sgr-2020.pdf
-const LOW_RANGE = 1.94
+var low_range := 1.94
 # Estimated tire/flywheel inertia (kg m²); friction coefficients below are tuning.
 const WHEEL_INERTIA = 2.0
 const ENGINE_INERTIA = 0.18
 # UMZ-451M anchors: 166.7 Nm at 2000–2500 rpm, 55.2 kW at 4000 rpm.
 # NIIAT 1985: https://djvu.online/file/E7JLHe1SqQfoa (UAZ-452V).
 # Intermediate points, idle/launch/rev limits are tuning estimates, not dyno data.
-const TORQUE_CURVE = [Vector2(650,105), Vector2(1200,145), Vector2(2200,166.7), Vector2(2500,166.7), Vector2(3200,154), Vector2(4000,132), Vector2(4500,100), Vector2(4800,0)]
+var torque_curve := [Vector2(650,105), Vector2(1200,145), Vector2(2200,166.7), Vector2(2500,166.7), Vector2(3200,154), Vector2(4000,132), Vector2(4500,100), Vector2(4800,0)]
 # Assumed driveline efficiency and Cd * frontal area; calibrated for ~110 km/h
 # empty on pavement. The original 75 hp version was rated at 95 km/h.
 const EFFICIENCY = 0.85
-const DRAG_AREA = 2.2
+var drag_area := 2.2
+var steering_response := 0.12
+var steering_limit := 0.50
 var wheels: Array[VehicleWheel3D] = []
 var drive_mode := "2H"
 var wheel_visuals: Array[Node3D] = []
@@ -123,11 +125,11 @@ func _ready() -> void:
 	model = Node3D.new()
 	model.name = "Bodywork"
 	add_child(model)
-	model.position = MODEL_OFFSET
+	model.position = model_offset
 	build_body()
 	build_details()
 	build_interior()
-	for axle in AXLES:
+	for axle in axle_positions:
 		for side in [-1,1]: build_wheel(side,axle)
 	driver_eye = Marker3D.new()
 	model.add_child(driver_eye)
@@ -159,7 +161,11 @@ func build_details() -> void:
 	tail_material = finish("8c2820",0.05,0.3)
 	tail_material.emission_enabled = true
 	tail_material.emission = Color("b52f1d")
-	var plate := finish("c9c9b2")
+	var plate := ShaderMaterial.new()
+	plate.shader = preload("res://materials/plate.gdshader")
+	var plate_font := FontVariation.new()
+	plate_font.base_font = ThemeDB.fallback_font
+	plate_font.variation_embolden = 0.8
 	for side in [-1,1]:
 		cylinder(model,Vector3(side*0.66,1.065,-2.065),0.153,0.055,dark,Vector3.FORWARD)
 		cylinder(model,Vector3(side*0.66,1.065,-2.103),0.129,0.024,lamp,Vector3.FORWARD)
@@ -186,7 +192,7 @@ func build_details() -> void:
 			rod(model,Vector3(side*0.974,0.91,z),Vector3(side*0.974,1.30,z),0.006,rubber)
 		for y in [0.98,1.28]:
 			box(model,Vector3(side*0.982,y,-1.81),Vector3(0.035,0.07,0.07),steel)
-		for axle in AXLES:
+		for axle in axle_positions:
 			box(model,Vector3(side*0.78,0.37,axle+0.48),Vector3(0.29,0.36,0.035),rubber)
 		for z in [0.55,0.68,0.81,0.94]:
 			box(model,Vector3(side*0.975,1.14,z),Vector3(0.016,0.025,0.075),dark)
@@ -206,10 +212,11 @@ func build_details() -> void:
 		box(model,Vector3(0,0.67,z+signf(z)*0.042),Vector3(0.43,0.105,0.012),plate)
 		var text := Label3D.new()
 		model.add_child(text)
-		text.text = "К 452 ДМ  38"
+		text.text = "PORA DOMOY"
+		text.font = plate_font
 		text.font_size = 32
-		text.pixel_size = 0.00115
-		text.modulate = Color("242b2d")
+		text.pixel_size = minf(0.0017,0.385/plate_font.get_string_size(text.text,HORIZONTAL_ALIGNMENT_LEFT,-1,32).x)
+		text.modulate = Color("101010")
 		text.outline_size = 0
 		text.position = Vector3(0,0.67,z+signf(z)*0.05)
 		if z<0: text.rotation.y = PI
@@ -217,7 +224,7 @@ func build_details() -> void:
 	for x in [-0.12,0.12]: box(model,Vector3(x,1.18,2.12),Vector3(0.12,0.035,0.035),steel)
 	# Ladder frame and differential housings, above the snow.
 	for x in [-0.53,0.53]: box(model,Vector3(x,0.39,0),Vector3(0.08,0.12,3.65),dark)
-	for z in AXLES:
+	for z in axle_positions:
 		cylinder(model,Vector3(0,0.34,z),0.055,1.45,dark)
 		cylinder(model,Vector3(0,0.34,z),0.13,0.25,dark)
 
@@ -279,6 +286,7 @@ func build_wheel(side: int, axle: float) -> void:
 	wheel.wheel_friction_slip = 0.0 # Tire forces below; keep native suspension only.
 	wheel.use_as_traction = axle>0
 	wheel.use_as_steering = axle<0
+	wheel.set_meta("connection",wheel.position)
 	add_child(wheel)
 	wheels.append(wheel)
 	# Native wheel handles suspension/steering/rolling; this pivot adds tire slip.
@@ -300,10 +308,10 @@ func build_wheel(side: int, axle: float) -> void:
 			tread.rotation.x = angle
 
 func engine_torque(rpm: float) -> float:
-	for i in range(TORQUE_CURVE.size()-1):
-		if rpm <= TORQUE_CURVE[i+1].x:
-			var t := inverse_lerp(TORQUE_CURVE[i].x,TORQUE_CURVE[i+1].x,rpm)
-			return lerpf(TORQUE_CURVE[i].y,TORQUE_CURVE[i+1].y,clampf(t,0,1))
+	for i in range(torque_curve.size()-1):
+		if rpm <= torque_curve[i+1].x:
+			var t := inverse_lerp(torque_curve[i].x,torque_curve[i+1].x,rpm)
+			return lerpf(torque_curve[i].y,torque_curve[i+1].y,clampf(t,0,1))
 	return 0.0
 
 func select_drive_mode(mode: String) -> bool:
@@ -326,7 +334,7 @@ func contact_load(i: int) -> float:
 	if not wheel.is_in_contact(): return 0.0
 	# Reconstruct the native spring/damper load from its contact, without changing it.
 	var normal := wheel.get_contact_normal()
-	var connection := to_global(Vector3((-1 if i%2==0 else 1)*0.7275,-0.22,AXLES[i/2]))
+	var connection := to_global(wheel.get_meta("connection"))
 	# The native ray starts one radius above the connection, but scales hit distance.
 	var ray_length := wheel.wheel_rest_length+wheel.wheel_radius
 	var distance := (connection-wheel.get_contact_point()).dot(global_basis.y)+wheel.wheel_radius
@@ -336,6 +344,13 @@ func contact_load(i: int) -> float:
 	var rate := velocity.dot(normal)*inverse_dot
 	var damping := wheel.damping_compression if rate<0 else wheel.damping_relaxation
 	return clampf(mass*(wheel.suspension_stiffness*(wheel.wheel_rest_length-length)*inverse_dot-damping*rate),0,wheel.suspension_max_force)
+
+func tyre_grip(i: int) -> float:
+	var cover := wheel_surfaces[i]
+	return lerpf(lerpf(0.42,0.36,cover.y),0.045,cover.x)
+
+func wheel_drive_torque(_i: int, shaft_torque: float, driven_count: int) -> float:
+	return shaft_torque/driven_count # One engine; 50/50 axle split in 4WD.
 
 func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> void:
 	speed = -linear_velocity.dot(global_basis.z)
@@ -349,8 +364,8 @@ func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> v
 	throttle = move_toward(throttle,pedal,delta*(2.5 if pedal>throttle else 5.0))
 	# Prompt pedal/rack response; mass and contact forces provide the heaviness.
 	# Leave enough steering authority to exceed grip and countersteer on snow.
-	var limit := minf(0.50,maxf(0.10,atan(2.3*8.0/maxf(speed*speed,1))))
-	steering = lerpf(steering,turn*limit,1-exp(-delta/(0.12+absf(speed)*0.003)))
+	var limit := minf(steering_limit,maxf(0.10,atan((axle_positions[1]-axle_positions[0])*8.0/maxf(speed*speed,1))))
+	steering = lerpf(steering,turn*limit,1-exp(-delta/(steering_response+absf(speed)*0.003)))
 	var driven_count := 2 if drive_mode=="2H" else 4
 	var wheel_rotation := 0.0
 	var contacts := 0
@@ -366,39 +381,39 @@ func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> v
 		if wheel.use_as_traction:
 			wheel_rotation += wheel_omega[i]/driven_count
 			spinning = spinning or absf(wheel_omega[i]*wheel.wheel_radius-speed)>maxf(2.0,absf(speed)*0.4)
-	var transfer := LOW_RANGE if drive_mode=="4L" else 1.0
-	var ratio: float = (GEARS[gear-1] if gear>0 else REVERSE_RATIO)*transfer
+	var transfer := low_range if drive_mode=="4L" else 1.0
+	var ratio: float = (gear_ratios[gear-1] if gear>0 else reverse_ratio)*transfer
 	var wheel_rpm := absf(wheel_rotation)*60/TAU
-	var coupled_rpm := wheel_rpm*ratio*FINAL_DRIVE
+	var coupled_rpm := wheel_rpm*ratio*final_drive
 	if gear>0 and shift_time<=0 and contacts>0:
 		var next_gear := gear
 		if absf(speed)<0.5 and not spinning: next_gear = 1
 		elif coupled_rpm>3600 and gear<4 and throttle>0.1 and not spinning:
-			var higher_ratio: float = GEARS[gear]*transfer
-			var available := engine_torque(coupled_rpm*higher_ratio/ratio)*higher_ratio*FINAL_DRIVE*EFFICIENCY/0.375
-			var load := mass*9.81*(rolling_coefficient+maxf(-global_basis.z.y,0))+0.5*1.225*DRAG_AREA*speed*speed
+			var higher_ratio: float = gear_ratios[gear]*transfer
+			var available := engine_torque(coupled_rpm*higher_ratio/ratio)*higher_ratio*final_drive*EFFICIENCY/wheels[0].wheel_radius
+			var load := mass*9.81*(rolling_coefficient+maxf(-global_basis.z.y,0))+0.5*1.225*drag_area*speed*speed
 			if available>load+200: next_gear += 1
 		elif coupled_rpm<1400 and gear>1: next_gear -= 1
 		if next_gear!=gear:
 			gear = next_gear
 			shift_time = 0.3
-			ratio = GEARS[gear-1]*transfer
-			coupled_rpm = wheel_rpm*ratio*FINAL_DRIVE
+			ratio = gear_ratios[gear-1]*transfer
+			coupled_rpm = wheel_rpm*ratio*final_drive
 	var uphill := maxf(-global_basis.z.y if gear>0 else global_basis.z.y,0)
 	var launch_rpm := 1400+800*smoothstep(0,0.3,uphill)
 	engine_rpm = lerpf(engine_rpm,maxf(coupled_rpm,lerpf(760,launch_rpm,throttle)),1-exp(-delta*8))
-	var shaft_torque := (1 if gear>0 else -1)*engine_torque(engine_rpm)*throttle*ratio*FINAL_DRIVE*EFFICIENCY
+	var shaft_torque := (1 if gear>0 else -1)*engine_torque(engine_rpm)*throttle*ratio*final_drive*EFFICIENCY
 	if shift_time>0: shaft_torque = 0
 	else:
 		var overrun := 10+28*pow(engine_rpm/3000,2)
 		var closed_throttle := maxf(1-throttle,smoothstep(4500,5000,engine_rpm))
-		shaft_torque -= signf(wheel_rotation)*overrun*closed_throttle*smoothstep(760,1200,coupled_rpm)*ratio*FINAL_DRIVE
+		shaft_torque -= signf(wheel_rotation)*overrun*closed_throttle*smoothstep(760,1200,coupled_rpm)*ratio*final_drive
 	if braking or brake_pressure>0: shaft_torque = 0
 	brake_pressure = move_toward(brake_pressure,1.0 if braking else 0.0,delta*6)
 	engine_force = 0
 	# Longitudinal braking is included in tire torque; native brake would apply it twice.
 	brake = 0
-	apply_central_force(-linear_velocity*linear_velocity.length()*0.5*1.225*DRAG_AREA)
+	apply_central_force(-linear_velocity*linear_velocity.length()*0.5*1.225*drag_area)
 	var suspension := 0.0
 	drive_force = 0.0
 	for i in range(wheels.size()):
@@ -414,15 +429,15 @@ func drive(accelerator: float, turn: float, foot_brake: bool, delta: float) -> v
 		var lateral_speed := velocity.dot(side)
 		wheel_slip[i] = slip_speed if wheel.is_in_contact() else 0.0
 		var cover := wheel_surfaces[i]
-		var grip := lerpf(lerpf(0.42,0.36,cover.y),0.045,cover.x)
+		var grip := tyre_grip(i)
 		var slip := Vector2(slip_speed,lateral_speed).length()/maxf(absf(rolling_speed),2.0)
 		grip *= lerpf(1.0,0.78,smoothstep(0.12,0.8,slip))
 		var load := contact_load(i)
 		var inertia := WHEEL_INERTIA
 		var torque := 0.0
 		if wheel.use_as_traction:
-			torque = shaft_torque/driven_count # One engine; 50/50 axle split in 4WD.
-			inertia += ENGINE_INERTIA*pow(ratio*FINAL_DRIVE,2)/driven_count
+			torque = wheel_drive_torque(i,shaft_torque,driven_count)
+			inertia += ENGINE_INERTIA*pow(ratio*final_drive,2)/driven_count
 		var brake_torque := brake_pressure*mass*5.0*radius/wheels.size()
 		var brake_reaction := clampf(wheel_omega[i]*inertia/delta+torque,-brake_torque,brake_torque)
 		# Implicit rolling constraint; excess torque accelerates the tire, not the van.
@@ -509,7 +524,18 @@ func make_audio() -> void:
 
 func _process(delta: float) -> void:
 	for i in range(wheel_visuals.size()):
-		wheel_visuals[i].rotation.x = lerpf(previous_spin[i],spin_angle[i],Engine.get_physics_interpolation_fraction())
+		var wheel := wheels[i]
+		var tire := wheel_visuals[i]
+		# Native suspension centres can sit below the ray contact's radius.
+		# Correct only the mesh along suspension travel; retain steering and roll.
+		tire.position = Vector3.ZERO
+		if wheel.is_in_contact():
+			var normal := wheel.get_contact_normal()
+			var up := global_basis.y.normalized()
+			var clearance := (wheel.global_position-wheel.get_contact_point()).dot(normal)
+			var offset := (wheel.wheel_radius-clearance)/maxf(up.dot(normal),0.1)
+			tire.position = wheel.global_basis.inverse()*(up*offset)
+		tire.rotation.x = lerpf(previous_spin[i],spin_angle[i],Engine.get_physics_interpolation_fraction())
 	paint.set_shader_parameter("body_inverse",model.global_transform.affine_inverse())
 	if not sound: return
 	road_sound.pitch_scale = 0.75+minf(absf(speed)/18,0.75)

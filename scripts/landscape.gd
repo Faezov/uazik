@@ -171,7 +171,7 @@ func make_road(chunk: Node3D, row: int) -> void:
 		for offset: float in offsets:
 			var p := center+right*offset
 			# Match the collision's actual triangles, including at tile boundaries.
-			p.y = collision_height(p.x,p.z)+0.03
+			p.y = collision_height(p.x,p.z)+0.002
 			var biome := biome_at(p.x,p.z)
 			var color: Color = biome.road
 			if absf(offset)>3.4: color = biome.snow

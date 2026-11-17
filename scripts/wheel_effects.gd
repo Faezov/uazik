@@ -43,6 +43,14 @@ func setup(vehicle: VehicleBody3D, terrain: Node3D) -> void:
 	tracks.multimesh.visible_instance_count = 0
 	add_child(tracks)
 
+func set_vehicle(vehicle: VehicleBody3D) -> void:
+	car = vehicle
+	for i in range(4):
+		previous[i] = Vector3.INF
+		grounded[i] = false
+		spin_delay[i] = 0.0
+		for stream: GPUParticles3D in emitters[i]: stream.emitting = false
+
 func make_emitter(kind: int) -> GPUParticles3D:
 	var emitter := GPUParticles3D.new()
 	emitter.name = ["Snow","Dust","Mud"][kind]+str(emitters.size())

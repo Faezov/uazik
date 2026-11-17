@@ -3,6 +3,8 @@ extends Node3D
 @export var world_seed := 452
 var landscape: Node3D
 
+var using_niva := false
+var notice_text := "Stop before changing low range"
 var car: VehicleBody3D
 var camera: Camera3D
 var inspection: Camera3D
@@ -94,7 +96,7 @@ func _ready() -> void:
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	instructions.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	instructions.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	instructions.text = "WASD / Arrows: drive     Space: brake     C: camera     V: inspect     R: return to road     F3: telemetry     Esc: pause"
+	instructions.text = "WASD / Arrows: drive     Space: brake     C: camera     V: inspect     R: return to road     F2: vehicle (stop)     F3: telemetry     Esc: pause"
 	instructions.text += "\nM: radio on/off   N: next track     F1: controls on/off"
 	help_tween = create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	help_tween.tween_interval(5.0)
@@ -136,6 +138,38 @@ func make_car() -> void:
 	camera.fov = 63
 	camera.position = car.position+Vector3(4,3,7)
 
+func switch_vehicle() -> bool:
+	if inspection.active or car.linear_velocity.length()>0.1 or car.angular_velocity.length()>0.1:
+		notice_text = "Stop before switching vehicles"
+		mode_notice = 2.5
+		return false
+	var previous := car
+	var next := VehicleBody3D.new()
+	using_niva = not using_niva
+	next.set_script(preload("res://scripts/niva.gd") if using_niva else preload("res://scripts/vehicle.gd"))
+	next.name = "Niva" if using_niva else "Bukhanka"
+	next.transform = previous.transform
+	next.surface_at = landscape.surface_at
+	# Remove the old physics body before adding its replacement.
+	previous.get_node("Snow").reparent(self)
+	remove_child(previous)
+	previous.free()
+	car = next
+	add_child(car)
+	var height := -INF
+	for wheel in car.wheels:
+		var connection: Vector3 = car.global_basis*wheel.get_meta("connection")
+		var contact: Vector3 = car.position+connection-car.global_basis.y*(wheel.wheel_rest_length+wheel.wheel_radius)
+		height = maxf(height,surface_height(contact.x,contact.z)-contact.y+car.position.y)
+	car.position.y = height+0.01
+	car.reset_physics_interpolation()
+	get_node("Snow").reparent(car)
+	landscape.follow = car
+	inspection.car = car
+	get_node("WheelEffects").set_vehicle(car)
+	camera_reset = true
+	return true
+
 func elevation(z: float) -> float:
 	return landscape.road_point(z).y
 
@@ -157,6 +191,7 @@ func recover_car(z: float) -> void:
 
 func make_snow() -> void:
 	var snow := CPUParticles3D.new()
+	snow.name = "Snow"
 	car.add_child(snow)
 	snow.position.y = 12
 	snow.amount = 650
@@ -178,7 +213,15 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if audio_settings.visible: return
 	if event.is_pressed() and not event.is_echo():
 		if event.keycode in [KEY_1,KEY_2,KEY_3]:
-			if not car.select_drive_mode(["2H","4H","4L"][event.keycode-KEY_1]): mode_notice = 2.5
+			var mode: String = (["4H","4H","4L"] if using_niva else ["2H","4H","4L"])[event.keycode-KEY_1]
+			if not car.select_drive_mode(mode):
+				notice_text = "Stop before changing low range"
+				mode_notice = 2.5
+		if event.keycode == KEY_F2: switch_vehicle()
+		if event.keycode == KEY_L and using_niva:
+			if not car.toggle_centre_lock():
+				notice_text = "Stop before changing centre lock"
+				mode_notice = 2.5
 		if event.keycode == KEY_F3: debug_label.visible = not debug_label.visible
 		if event.keycode == KEY_C:
 			inside = not inside
@@ -201,8 +244,12 @@ func _physics_process(delta: float) -> void:
 		recover_car(car.position.z)
 	if car.position.z < -485 and absf(car.position.x-route(car.position.z))<22: arrived = true
 	label.text = ("You’re home. Take a moment." if arrived else "Drive home ·\n%d m remaining" % maxi(0,int(490+car.position.z)))
-	label.text += "\n%02d km/h  ·  %s\n1: 2H   2: 4H   3: 4L (stop)" % [int(car.linear_velocity.length()*3.6),car.drive_mode]
-	if mode_notice>0: label.text += "\nStop before changing low range"
+	label.text += "\n%02d km/h  ·  %s  ·  %s" % [int(car.linear_velocity.length()*3.6),"Нива 2121" if using_niva else "Буханка",car.drive_mode]
+	if using_niva:
+		label.text += "\n2: high   3: low (stop)   L: centre lock (%s)" % ("LOCKED" if car.centre_locked else "open")
+	else:
+		label.text += "\n1: 2H   2: 4H   3: 4L (stop)"
+	if mode_notice>0: label.text += "\n"+notice_text
 	if debug_label.visible:
 		var slip := PackedStringArray()
 		for value in car.wheel_slip: slip.append("%+.1f" % value)
