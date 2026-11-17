@@ -3,6 +3,8 @@ extends Node3D
 @export var world_seed := 452
 var landscape: Node3D
 
+var biome_environment: Environment
+var biome_sun: DirectionalLight3D
 var using_niva := false
 var notice_text := "Stop before changing low range"
 var car: VehicleBody3D
@@ -59,11 +61,13 @@ func _ready() -> void:
 	env.environment.fog_enabled = true
 	env.environment.fog_light_color = Color("8e9eaf")
 	env.environment.fog_density = 0.014
+	biome_environment = env.environment
 	add_child(env)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-12, -35, 0)
 	sun.light_color = Color("ffd4a2")
 	sun.light_energy = 0.65
+	biome_sun = sun
 	add_child(sun)
 	landscape = preload("res://scripts/landscape.gd").new()
 	add_child(landscape)
@@ -125,6 +129,7 @@ func make_car() -> void:
 	car.name = "Bukhanka"
 	add_child(car)
 	car.surface_at = landscape.surface_at
+	car.surface_grip = landscape.grip_at
 	# Start interpolation history before the initial teleport.
 	car.get_global_transform_interpolated()
 	recover_car(0.0)
@@ -150,6 +155,7 @@ func switch_vehicle() -> bool:
 	next.name = "Niva" if using_niva else "Bukhanka"
 	next.transform = previous.transform
 	next.surface_at = landscape.surface_at
+	next.surface_grip = landscape.grip_at
 	# Remove the old physics body before adding its replacement.
 	previous.get_node("Snow").reparent(self)
 	remove_child(previous)
@@ -263,6 +269,18 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	var autumn: float = landscape.autumn_at(car.position.z)
+	biome_environment.fog_density = lerpf(0.014,0.004,autumn)
+	biome_environment.fog_light_color = Color("8e9eaf").lerp(Color("b9b4a4"),autumn)
+	biome_environment.background_color = Color("66768b").lerp(Color("a5b3bd"),autumn)
+	biome_sun.rotation_degrees.x = lerpf(-12,-28,autumn)
+	biome_sun.light_energy = lerpf(0.65,0.9,autumn)
+	var snow := car.get_node("Snow") as CPUParticles3D
+	# CPUParticles3D has no amount_ratio. Shrink flakes without reallocating them.
+	snow.scale_amount_min = 0.025*(1-autumn)
+	snow.scale_amount_max = 0.065*(1-autumn)
+	snow.emitting = autumn<1.0
+	snow.visible = autumn<1.0
 	if not camera.current: return
 	var pose := car.get_global_transform_interpolated()
 	var heading := atan2(pose.basis.z.x,pose.basis.z.z)

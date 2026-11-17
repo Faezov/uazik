@@ -35,6 +35,7 @@ var spin_angle := PackedFloat64Array([0,0,0,0])
 var previous_spin := PackedFloat64Array([0,0,0,0])
 # Contact sampler returns ice coverage and snow depth (both 0..1).
 var surface_at: Callable
+var surface_grip: Callable
 var wheel_surfaces: Array[Vector2] = [Vector2.ZERO,Vector2.ZERO,Vector2.ZERO,Vector2.ZERO]
 var model: Node3D
 var steering_wheel: Node3D
@@ -347,7 +348,10 @@ func contact_load(i: int) -> float:
 
 func tyre_grip(i: int) -> float:
 	var cover := wheel_surfaces[i]
-	return lerpf(lerpf(0.42,0.36,cover.y),0.045,cover.x)
+	var grip := lerpf(lerpf(0.42,0.36,cover.y),0.045,cover.x)
+	if surface_grip.is_valid() and wheels[i].is_in_contact():
+		return surface_grip.call(wheels[i].get_contact_point(),grip)
+	return grip
 
 func wheel_drive_torque(_i: int, shaft_torque: float, driven_count: int) -> float:
 	return shaft_torque/driven_count # One engine; 50/50 axle split in 4WD.

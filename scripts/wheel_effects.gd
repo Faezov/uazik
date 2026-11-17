@@ -2,8 +2,7 @@ extends Node3D
 
 const TRACK_LIMIT := 4096
 const TRACK_STEP := 0.22
-# Dirt/mud are opt-in collider metadata: surface_type = "dirt" or "mud".
-# The winter landscape and its physical contact sampler remain unchanged.
+# Explicit dirt/mud collider tags still override the procedural biome.
 const SURFACES := [&"snow", &"ice", &"dirt", &"mud"]
 var car: VehicleBody3D
 var landscape: Node3D
@@ -143,6 +142,7 @@ func _physics_process(delta: float) -> void:
 	clock += delta
 	for i in range(4):
 		var wheel: VehicleWheel3D = car.wheels[i]
+		emitters[i][0].visible = landscape.autumn_at(car.global_position.z)<1.0
 		var contact := wheel.get_contact_point()
 		var touching: bool = wheel.is_in_contact() and car.contact_load(i)>25 and contact.distance_to(car.global_position)<5
 		if not touching:
@@ -162,7 +162,9 @@ func _physics_process(delta: float) -> void:
 		var lateral := absf(velocity.dot(normal.cross(forward)))
 		var depth: float = car.wheel_surfaces[i].y
 		var ice: float = car.wheel_surfaces[i].x
+		var autumn: float = landscape.autumn_at(contact.z)
 		var kind := 1 if ice>0.5 else 0
+		if autumn>=1: kind = 2
 		var body := wheel.get_contact_body()
 		if is_instance_valid(body):
 			var tag := StringName(body.get_meta("surface_type",&""))
@@ -175,6 +177,7 @@ func _physics_process(delta: float) -> void:
 				kind = 0
 				ice = 0.0
 				depth = 0.95
+		var on_asphalt: bool = autumn>0 and absf(contact.x-landscape.road_point(contact.z).x)<3.4
 		var preset := maxi(0,kind-1)
 		var emitter: GPUParticles3D = emitters[i][preset]
 		var activity := maxf(0,speed*0.22+slip*0.85+lateral*0.7-0.30)
@@ -191,8 +194,19 @@ func _physics_process(delta: float) -> void:
 			process.scale_max = 0.05 if kind==1 else 0.13+depth*0.16
 		var density := (0.30+depth*0.70)*(1-ice*0.98) if preset==0 else (1.7 if preset==1 else 0.65)
 		emitter.amount_ratio = clampf(clampf(activity/6,0,1)*density,0,1)
+		if kind==2 and on_asphalt: emitter.amount_ratio *= 0.06
 		if kind==1: emitter.amount_ratio = clampf(activity/12,0,1)*0.035
 		for j in range(3): emitters[i][j].emitting = j==preset and emitter.amount_ratio>0.015
+		if autumn>0 and kind<2:
+			emitter.amount_ratio *= 1-autumn
+			emitter.emitting = emitter.amount_ratio>0.015
+			var dust: GPUParticles3D = emitters[i][1]
+			dust.amount_ratio = clampf(activity/6,0,1)*autumn*(0.06 if on_asphalt else 0.8)
+			dust.emitting = dust.amount_ratio>0.015
+			var dust_process := dust.process_material as ParticleProcessMaterial
+			dust_process.direction = launch.normalized()
+			dust_process.initial_velocity_min = launch.length()*0.1
+			dust_process.initial_velocity_max = launch.length()*0.2
 		if previous[i]==Vector3.INF or contact.distance_to(previous[i])>1.5:
 			previous[i] = contact
 			continue
@@ -205,6 +219,8 @@ func _physics_process(delta: float) -> void:
 		if kind==1: color = Color(0.70,0.83,0.94,0.035+strength*0.13)
 		elif kind==2: color = Color(0.23,0.18,0.13,0.28+strength*0.15)
 		elif kind==3: color = Color(0.12,0.085,0.055,0.50+strength*0.22)
+		if kind<2: color = color.lerp(Color(0.23,0.18,0.13,0.28+strength*0.15),autumn)
+		if on_asphalt: color.a *= lerpf(1.0,0.12,autumn)
 		if travel>=TRACK_STEP:
 			var steps := mini(8,ceili(travel/TRACK_STEP))
 			var direction := (contact-previous[i]).normalized()
